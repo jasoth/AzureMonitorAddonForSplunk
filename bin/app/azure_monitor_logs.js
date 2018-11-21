@@ -627,7 +627,8 @@ exports.streamEvents = function (name, singleInput, eventWriter, done) {
                 subs.checkPointHubPartition(err, name, hub);
 
                 var filterOption = subs.getFilterOffsets(name, hub);
-                var recvAddr = hub + '/ConsumerGroups/$default/Partitions/';
+                var ConsumerGroup = '$default';
+                var recvAddr = hub + '/ConsumerGroups/' + ConsumerGroup + '/Partitions/';
 
                 amqpClients[hub] = {};
                 amqpClients[hub].client = new AMQPClient(Policy.EventHub);
