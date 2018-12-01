@@ -443,6 +443,7 @@ exports.getScheme = function (schemeName, schemeDesc) {
             name: "SPNTenantID",
             dataType: Argument.dataTypeString,
             description: "Azure AD tenant containing the service principal.",
+            validation: "validate(match('SPNTenantID', '(?i)^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'), 'SPNTenantID is not in the guid format 00000000-0000-0000-0000-000000000000')",
             requiredOnCreate: false,
             requiredOnEdit: false
         }),
@@ -450,6 +451,7 @@ exports.getScheme = function (schemeName, schemeDesc) {
             name: "SPNApplicationId",
             dataType: Argument.dataTypeString,
             description: "Service principal application id (aka client id).",
+            validation: "validate(match('SPNApplicationId', '(?i)^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'), 'SPNApplicationId is not in the guid format 00000000-0000-0000-0000-000000000000')",
             requiredOnCreate: false,
             requiredOnEdit: false
         }),
@@ -465,6 +467,13 @@ exports.getScheme = function (schemeName, schemeDesc) {
             dataType: Argument.dataTypeString,
             description: "Azure Event Hub namespace.",
             requiredOnCreate: true,
+            requiredOnEdit: true
+        }),
+        new Argument({
+            name: "eventHubConsumerGroup",
+            dataType: Argument.dataTypeString,
+            description: "Azure Event Hub Consumer Group name. Default value: $Default",
+            requiredOnCreate: false,
             requiredOnEdit: false
         }),
         new Argument({
@@ -472,21 +481,21 @@ exports.getScheme = function (schemeName, schemeDesc) {
             dataType: Argument.dataTypeString,
             description: "Key vault name.",
             requiredOnCreate: true,
-            requiredOnEdit: false
+            requiredOnEdit: true
         }),
         new Argument({
             name: "secretName",
             dataType: Argument.dataTypeString,
             description: "Name of the secret containing SAS key & value.",
             requiredOnCreate: true,
-            requiredOnEdit: false
+            requiredOnEdit: true
         }),
         new Argument({
             name: "secretVersion",
             dataType: Argument.dataTypeString,
             description: "Version of the secret containing SAS key & value.",
             requiredOnCreate: true,
-            requiredOnEdit: false
+            requiredOnEdit: true
         })
         // other arguments here
     ];
@@ -501,6 +510,7 @@ exports.streamEvents = function (name, singleInput, eventWriter, done) {
 
     // setup
     var eventHubNamespace = singleInput.eventHubNamespace;
+    var eventHubConsumerGroup = singleInput.eventHubConsumerGroup || '$Default';
     var SPNName = singleInput.SPNApplicationId;
     var SPNPassword = singleInput.SPNApplicationKey;
     var SPNTenantID = singleInput.SPNTenantID;
@@ -627,8 +637,7 @@ exports.streamEvents = function (name, singleInput, eventWriter, done) {
                 subs.checkPointHubPartition(err, name, hub);
 
                 var filterOption = subs.getFilterOffsets(name, hub);
-                var ConsumerGroup = '$default';
-                var recvAddr = hub + '/ConsumerGroups/' + ConsumerGroup + '/Partitions/';
+                var recvAddr = hub + '/ConsumerGroups/' + eventHubConsumerGroup + '/Partitions/';
 
                 amqpClients[hub] = {};
                 amqpClients[hub].client = new AMQPClient(Policy.EventHub);

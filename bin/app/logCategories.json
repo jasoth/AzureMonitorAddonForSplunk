@@ -24,8 +24,6 @@
     "MICROSOFT.STREAMANALYTICS/STREAMINGJOBS/EXECUTION":"amdl:sa:jobs:execution",
     "MICROSOFT.STREAMANALYTICS/STREAMINGJOBS/AUTHORING":"amdl:sa:jobs:authoring",
     "MICROSOFT.SECURITYGRAPH/ALERT": "amdl:securitygraph:alert",
-    "MICROSOFT.AADIAM/AUDIT": "amdl:aadal:audit",
-    "MICROSOFT.AADIAM/AUDITLOGS": "amdl:aadal:auditlogs",
-    "MICROSOFT.AADIAM/SIGNIN": "amdl:aadal:signin",
-    "MICROSOFT.AADIAM/SIGNINLOGS": "amdl:aadal:signinlogs"
+    "MICROSOFT.AADIAM/AUDITLOGS": "amdl:aadal:auditLogs",
+    "MICROSOFT.AADIAM/SIGNINLOGS": "amdl:aadal:signinLogs"
 }
