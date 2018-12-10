@@ -1,38 +1,35 @@
 ﻿param(
-    # Parameter help description
-    [Parameter(Mandatory=$false)]
-    [string] $Subscription = '3818195e-8660-4d47-b256-99f49c384cc7',
-    # Parameter help description
-    [Parameter(Mandatory=$false)]
-    [string] $TenantId = 'cc7d0b33-84c6-4368-a879-2e47139b7b1f',
-	# Parameter help description
+    # Azure SubscriptionId or Name
+    [Parameter(Mandatory=$true)]
+    [string] $Subscription,
+    # TenantId or Name backing Azure Subscription
+    [Parameter(Mandatory=$true)]
+    [string] $TenantId,
+	# Specifies the display name of the application
     [Parameter(Mandatory=$false)]
     [string] $AzureADApplicationName = 'AzureMonitorSplunkAddOn',
-    # Parameter help description
+    # Name of Default Resource Group to contain Azure resources if not specified by EventHubResourceGroupName or KeyVaultResourceGroupName
     [Parameter(Mandatory=$false)]
     [string] $DefaultResourceGroupName = $AzureADApplicationName,
-    # Parameter help description
-    [Parameter(Mandatory=$false)]
-    [string] $DefaultResourceGroupLocation = 'North Central US',
-    # Parameter help description
+    # Location to create resources when not already present
+    [Parameter(Mandatory=$true)]
+    [string] $DefaultResourceLocation,
+    # Name of Resource Group to contain Event Hub Namespace
     [Parameter(Mandatory=$false)]
     [string] $EventHubResourceGroupName = $DefaultResourceGroupName,
-    # Parameter help description
-    [Parameter(Mandatory=$false)]
-    [string] $EventHubNamespaceName = 'spleh2',
-    # Parameter help description
+    # Name of EventHub Namespace
+    [Parameter(Mandatory=$true)]
+    [ValidatePattern("^[a-zA-Z][a-zA-Z0-9-]{4,48}[a-zA-Z0-9]$")]
+    [string] $EventHubNamespaceName,
+    # Name of Resource Group to contain Key Vault
     [Parameter(Mandatory=$false)]
     [string] $KeyVaultResourceGroupName = $DefaultResourceGroupName,
-    # Parameter help description
-    [Parameter(Mandatory=$false)]
-    [string] $KeyVaultName = 'splkv2'
+    # Name of Key Vault
+    [Parameter(Mandatory=$true)]
+    [ValidatePattern("^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$")]
+    [string] $KeyVaultName
 )
 
-# Variables used below
-#$subscriptionId = "<Your Azure Subscription Id>"
-#$tenantId = "<Your Azure AD Tenant Id>"
-#$splunkResourceGroupName = "AzureMonitorSplunkAddOn"
-#$splunkResourceGroupLocation = "North Central US"
 # Note: The resource group name can be a new or existing resource group.
 
 #################################################################
@@ -41,15 +38,13 @@
 $ErrorActionPreference = "Stop"
 $WarningPreference = "SilentlyContinue"
 
-$azureSession = Login-AzureRmAccount -Subscription $Subscription -TenantId $TenantId
-
-# Lookup AAD Application
-Write-Host "Looking up Azure AD Application '$AzureADApplicationName'." -ForegroundColor Yellow
-$azureAdApp = Get-AzureRmADApplication -DisplayNameStartWith $AzureADApplicationName -ErrorAction SilentlyContinue | Where-Object DisplayName -EQ $AzureADApplicationName
-
-# Lookup AAD Service Principal
-Write-Host "Looking up service principal for Azure AD application '$AzureADApplicationName'." -ForegroundColor Yellow
-$azureAdSp = Get-AzureRmADServicePrincipal -SearchString $AzureADApplicationName -ErrorAction SilentlyContinue | Where-Object DisplayName -EQ $AzureADApplicationName
+## Authenticate and Set Azure Context
+$AzureRmContext = Get-AzureRmContext
+if (!$AzureRmContext.Subscription -or $AzureRmContext.Subscription.Id -ne $Subscription) {
+	Write-Host 'Please complete authentication in popup window.'
+    Add-AzureRmAccount -Subscription $Subscription -TenantId $TenantId
+    $AzureRmContext = Get-AzureRmContext
+}
 
 ## Ensure Event Hub Namespace Exists
 # Lookup Event Hub Namespace
@@ -58,8 +53,8 @@ $eventHubNamespace = Get-AzureRmEventHubNamespace -ResourceGroupName $EventHubRe
 
 # Create Event Hub (if needed)
 if (!$eventHubNamespace) {
-    Write-Host "Creating resource group '$EventHubResourceGroupName' in region '$DefaultResourceGroupLocation'." -ForegroundColor Yellow
-    $eventHubResourceGroup = New-AzureRmResourceGroup -Name $EventHubResourceGroupName -Location $DefaultResourceGroupLocation -Force
+    Write-Host "Creating resource group '$EventHubResourceGroupName' in region '$DefaultResourceLocation'." -ForegroundColor Yellow
+    $eventHubResourceGroup = New-AzureRmResourceGroup -Name $EventHubResourceGroupName -Location $DefaultResourceLocation -Force
 
     Write-Host "Creating event hub namespace '$EventHubNamespaceName' in resource group '$eventHubResourceGroupName'." -ForegroundColor Yellow
     $eventHubNamespace = New-AzureRmEventHubNamespace -ResourceGroupName $eventHubResourceGroup.ResourceGroupName `
@@ -77,8 +72,8 @@ $keyVault = Get-AzureRmKeyVault -ResourceGroupName $KeyVaultResourceGroupName -N
 
 # Create Key Vault (if needed)
 if (!$keyVault) {
-    Write-Host "Creating resource group '$KeyVaultResourceGroupName' in region '$DefaultResourceGroupLocation'." -ForegroundColor Yellow
-    $keyVaultResourceGroup = New-AzureRmResourceGroup -Name $KeyVaultResourceGroupName -Location $DefaultResourceGroupLocation -Force
+    Write-Host "Creating resource group '$KeyVaultResourceGroupName' in region '$DefaultResourceLocation'." -ForegroundColor Yellow
+    $keyVaultResourceGroup = New-AzureRmResourceGroup -Name $KeyVaultResourceGroupName -Location $DefaultResourceLocation -Force
 
     Write-Host "Creating Key Vault '$KeyVaultName' in resource group '$KeyVaultResourceGroupName'." -ForegroundColor Yellow
     $keyVault = New-AzureRmKeyVault -ResourceGroupName $keyVaultResourceGroup.ResourceGroupName `
@@ -86,21 +81,23 @@ if (!$keyVault) {
 }
 
 # Key Vault Secret
-Write-Host "- Setting default access policy for '$($azureSession.Context.Account.Id)'" -ForegroundColor Yellow
+Write-Host "- Setting default access policy for '$($AzureRmContext.Account.Id)'" -ForegroundColor Yellow
 Set-AzureRmKeyVaultAccessPolicy -ResourceGroupName $keyVault.ResourceGroupName -VaultName $keyVault.VaultName `
-    -UserPrincipalName $azureSession.Context.Account.Id `
+    -UserPrincipalName $AzureRmContext.Account.Id `
     -PermissionsToSecrets get,list,set,delete,recover,backup,restore `
     -PermissionsToKey get,list,update,create,import,delete,recover,backup,restore
 
 
-## Ensure Azure AD Application
-if (!$azureADApp) {
-    # Create an Azure AD App registration
-    #$ticks = [DateTime]::UtcNow.Ticks
-    #$AzureADApplicationName = "spladapp" + $ticks
+## Ensure Azure AD Application Registration
+# Lookup Azure AD Application Registration
+Write-Host "Looking up Azure AD Application '$AzureADApplicationName'." -ForegroundColor Yellow
+$azureAdApp = Get-AzureRmADApplication -DisplayNameStartWith $AzureADApplicationName -ErrorAction SilentlyContinue | Where-Object DisplayName -EQ $AzureADApplicationName
+
+# Create Azure AD Application Registration (if needed)
+if (!$azureAdApp) {
     $splunkAzureADAppHomePage = "https://" + $AzureADApplicationName
     Write-Host "Creating a new Azure AD application registration named '$AzureADApplicationName'." -ForegroundColor Yellow
-    $azureADApp = New-AzureRmADApplication -DisplayName $AzureADApplicationName -HomePage $splunkAzureADAppHomePage `
+    $azureAdApp = New-AzureRmADApplication -DisplayName $AzureADApplicationName -HomePage $splunkAzureADAppHomePage `
                 -IdentifierUris $splunkAzureADAppHomePage
 }
 
@@ -111,34 +108,43 @@ $rand.GetBytes($bytes)
 $clientSecret = [System.Convert]::ToBase64String($bytes)
 $clientSecretSecured = ConvertTo-SecureString -String $clientSecret -AsPlainText -Force
 $endDate = [System.DateTime]::Now.AddYears(1)
-Write-Host "- Adding a client secret to Azure AD application '$($azureADApp.DisplayName)'." -ForegroundColor Yellow
-New-AzureRmADAppCredential -ApplicationId $azureADApp.ApplicationId -Password $clientSecretSecured -EndDate $endDate
+Write-Host "- Adding a client secret to Azure AD application '$($azureAdApp.DisplayName)'." -ForegroundColor Yellow
+New-AzureRmADAppCredential -ApplicationId $azureAdApp.ApplicationId -Password $clientSecretSecured -EndDate $endDate | Out-Null
 
-## Ensure Azure AD Service Principal
+## Ensure Azure AD Service Principal associated with the Azure AD App
+# Lookup Azure AD Service Principal
+Write-Host "Looking up service principal for Azure AD application '$AzureADApplicationName'." -ForegroundColor Yellow
+$azureAdSp = Get-AzureRmADServicePrincipal -SearchString $AzureADApplicationName -ErrorAction SilentlyContinue | Where-Object DisplayName -EQ $AzureADApplicationName
+
+# Create Azure AD Service Principal (if needed)
 if (!$azureAdSp) {
-    # Create an Azure AD Service Principal associated with the Azure AD App
-    Write-Host "Creating service principal for Azure AD application '$($azureADApp.DisplayName)'" -ForegroundColor Yellow
-    $azureADSP = New-AzureRmADServicePrincipal -ApplicationId $azureADApp.ApplicationId
+    Write-Host "Creating service principal for Azure AD application '$($azureAdApp.DisplayName)'" -ForegroundColor Yellow
+    $azureAdSp = New-AzureRmADServicePrincipal -ApplicationId $azureAdApp.ApplicationId
 }
 
-# Assign the service principal to the Reader role for the Azure subscription
-Write-Host "Adding service principal '$($azureADSP.DisplayName)' to the Reader role for the subscription." -ForegroundColor Yellow
-$count = 0
-do {
-    # Allow some time for the service principal to propogate throughout Azure AD
-    Start-Sleep ($count++ * 10)
-    $roleAssignment = New-AzureRmRoleAssignment -RoleDefinitionName "Reader" -Scope "/subscriptions/$Subscription" `
-                        -ObjectId $azureADSP.Id -ErrorAction SilentlyContinue
-} while (($roleAssignment -eq $null) -and ($count -le 5))
+## Ensure Azure Role Assignment for Azure AD Service Principal
+# Lookup Azure Role Assignment
+Write-Host "Adding service principal '$($azureAdSp.DisplayName)' to the Reader role for the subscription." -ForegroundColor Yellow
+$roleAssignment = Get-AzureRmRoleAssignment -RoleDefinitionName "Reader" -Scope "/subscriptions/$Subscription" -ObjectId $azureAdSp.Id
 
-if ($roleAssignment -eq $null) {
-    Write-Error "Unable to assign service principal '$($azureADSP.DisplayName) to Reader role for the subscription.  Stopping script execution."
+# Create Azure Role Assignment (if needed)
+if (!$roleAssignment) {
+    $count = 0
+    do {
+        # Allow some time for the service principal to propogate throughout Azure AD
+        Start-Sleep ($count++ * 10)
+        $roleAssignment = New-AzureRmRoleAssignment -RoleDefinitionName "Reader" -Scope "/subscriptions/$Subscription" -ObjectId $azureAdSp.Id -ErrorAction SilentlyContinue
+    } while (($roleAssignment -eq $null) -and ($count -le 5))
+    
+    if ($roleAssignment -eq $null) {
+        Write-Error "Unable to assign service principal '$($azureAdSp.DisplayName) to Reader role for the subscription.  Stopping script execution."
+    }
 }
 
-# Give the service principal permissions to retrieve secrets from the key vault
-Write-Host "Assigning key vault 'read' permissions to secrets for service principal '$($azureADSP.DisplayName)'" -ForegroundColor Yellow 
+# Ensure the service principal permissions to retrieve secrets from the key vault
+Write-Host "Assigning key vault 'read' permissions to secrets for service principal '$($azureAdSp.DisplayName)'" -ForegroundColor Yellow 
 Set-AzureRmKeyVaultAccessPolicy -ResourceGroupName $keyVault.ResourceGroupName -VaultName $keyVault.VaultName `
-    -PermissionsToSecrets "get" -ObjectId $azureADSP.Id
+    -PermissionsToSecrets "get" -ObjectId $azureAdSp.Id
 
 # Add secrets to keyvault for event hub and REST API credentials
 Write-Host "Adding secrets to event hub namespace" -ForegroundColor Yellow
@@ -146,70 +152,53 @@ $eventHubPrimaryKeySecured = ConvertTo-SecureString -String $eventHubRootKey.Pri
 $eventHubCredentialsSecret = Set-AzureKeyVaultSecret -VaultName $keyVault.VaultName -Name "myEventHubCredentials" `
     -ContentType $eventHubRootKey.KeyName -SecretValue $eventHubPrimaryKeySecured
 $restAPICredentialsSecret = Set-AzureKeyVaultSecret -VaultName $keyVault.VaultName -Name "myRESTAPICredentials" `
-    -ContentType $azureADSP.ApplicationId -SecretValue $clientSecretSecured
-
-return
-
-## Export Azure Monitor Data
-# Create a new log profile to export activity log to event hub
-Write-Host "Configuring Azure Monitor Activity Log to export to event hub '$eventHubNamespaceName'" -ForegroundColor Yellow
-$logProfileName = "default"
-$locations = (Get-AzureRmLocation).Location
-$locations += "global"
-$serviceBusRuleId = "/subscriptions/$subscriptionId/resourceGroups/$splunkResourceGroupName" + ` 
-                    "/providers/Microsoft.EventHub/namespaces/$eventHubNamespaceName" + `
-                    "/authorizationrules/RootManageSharedAccessKey"
-Remove-AzureRmLogProfile -Name $logProfileName -ErrorAction SilentlyContinue
-Add-AzureRmLogProfile -Name $logProfileName -Location $locations -ServiceBusRuleId $serviceBusRuleId 
+    -ContentType $azureAdSp.ApplicationId -SecretValue $clientSecretSecured
 
 Write-Host "Azure configuration completed successfully!" -ForegroundColor Green
 
 # Configure Splunk
 # Settings needed to configure Splunk
-$transcriptPath = "$PSScriptRoot\$splunkResourceGroupName" + ".azureconfig" 
-Start-Transcript -Path $transcriptPath -Append -Force
+$SplunkConfigPath = "$PSScriptRoot\$AzureADApplicationName" + ".splunkconfig" 
 
-Write-Host ""
-Write-Host "****************************"
-Write-Host "*** SPLUNK CONFIGURATION ***"
-Write-Host "****************************"
-Write-Host ""
-Write-Host "Data Input Settings for configuration as explained at https://github.com/Microsoft/AzureMonitorAddonForSplunk/wiki/Configuration-of-Splunk."
-Write-Host ""
-Write-Host "  AZURE MONITOR ACTIVITY LOG"
-Write-Host "  ----------------------------"
-Write-Host "  Name:               Azure Monitor Activity Log"
-Write-Host "  SPNTenantID:       " $azureSession.Context.Tenant.Id
-Write-Host "  SPNApplicationId:  " $azureADSP.ApplicationId
-Write-Host "  SPNApplicationKey: " $clientSecret
-Write-Host "  eventHubNamespace: " $eventHubNamespace.Name
-Write-Host "  vaultName:         " $keyVault.VaultName
-Write-Host "  secretName:        " $eventHubCredentialsSecret.Name
-Write-Host "  secretVersion:     " $eventHubCredentialsSecret.Version
-Write-Host ""
-Write-Host "  AZURE MONITOR DIAGNOSTIC LOG"
-Write-Host "  ----------------------------"
-Write-Host "  Name:               Azure Monitor Diagnostic Log"
-Write-Host "  SPNTenantID:       " $azureSession.Context.Tenant.Id
-Write-Host "  SPNApplicationId:  " $azureADSP.ApplicationId
-Write-Host "  SPNApplicationKey: " $clientSecret
-Write-Host "  eventHubNamespace: " $eventHubNamespace.Name
-Write-Host "  vaultName:         " $keyVault.VaultName
-Write-Host "  secretName:        " $eventHubCredentialsSecret.Name
-Write-Host "  secretVersion:     " $eventHubCredentialsSecret.Version
-Write-Host ""
-Write-Host "  AZURE MONITOR METRICS"
-Write-Host "  ----------------------------"
-Write-Host "  Name:               Azure Monitor Metrics"
-Write-Host "  SPNTenantID:       " $azureSession.Context.Tenant
-Write-Host "  SPNApplicationId:  " $azureADSP.ApplicationId
-Write-Host "  SPNApplicationKey: " $clientSecret
-Write-Host "  SubscriptionId:    " $azureSession.Context.Subscription
-Write-Host "  vaultName:         " $keyVault.VaultName
-Write-Host "  secretName:        " $restAPICredentialsSecret.Name
-Write-Host "  secretVersion      " $restAPICredentialsSecret.Version
-Write-Host ""
+$SplunkConfig = @"
+****************************"
+*** SPLUNK CONFIGURATION ***"
+****************************"
 
-Stop-Transcript
+Data Input Settings for configuration as explained at https://github.com/Microsoft/AzureMonitorAddonForSplunk/wiki/Configuration-of-Splunk.
 
+  AZURE MONITOR ACTIVITY LOG
+  ----------------------------
+  Name:               Azure Monitor Activity Log
+  SPNTenantID:        $($AzureRmContext.Tenant.Id)
+  SPNApplicationId:   $($azureADSP.ApplicationId)
+  SPNApplicationKey:  $($clientSecret)
+  eventHubNamespace:  $($eventHubNamespace.Name)
+  vaultName:          $($keyVault.VaultName)
+  secretName:         $($eventHubCredentialsSecret.Name)
+  secretVersion:      $($eventHubCredentialsSecret.Version)
 
+  AZURE MONITOR DIAGNOSTIC LOG
+  ----------------------------
+  Name:               Azure Monitor Diagnostic Log
+  SPNTenantID:        $($AzureRmContext.Tenant.Id)
+  SPNApplicationId:   $($azureADSP.ApplicationId)
+  SPNApplicationKey:  $($clientSecret)
+  eventHubNamespace:  $($eventHubNamespace.Name)
+  vaultName:          $($keyVault.VaultName)
+  secretName:         $($eventHubCredentialsSecret.Name)
+  secretVersion:      $($eventHubCredentialsSecret.Version)
+
+  AZURE MONITOR METRICS
+  ----------------------------
+  Name:               Azure Monitor Metrics
+  SPNTenantID:        $($AzureRmContext.Tenant)
+  SPNApplicationId:   $($azureADSP.ApplicationId)
+  SPNApplicationKey:  $($clientSecret)
+  SubscriptionId:     $($AzureRmContext.Subscription.Id)
+  vaultName:          $($keyVault.VaultName)
+  secretName:         $($restAPICredentialsSecret.Name)
+  secretVersion       $($restAPICredentialsSecret.Version)
+"@
+Write-Host $SplunkConfig
+Set-Content $SplunkConfigPath -Value $SplunkConfig -Encoding Unicode
