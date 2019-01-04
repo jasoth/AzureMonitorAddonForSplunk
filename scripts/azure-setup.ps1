@@ -1,30 +1,40 @@
-﻿param(
-    # Azure SubscriptionId or Name
+﻿<#
+.SYNOPSIS
+    Create and Configure Azure resources required for the Azure Monitor Splunk Add-On
+.EXAMPLE
+    PS C:\> .\azure-setup.ps1 -Subscription 00000000-0000-0000-0000-000000000000 -TenantId 00000000-0000-0000-0000-000000000000 -DefaultResourceLocation uscentral -EventHubResourceGroupName AzureMonitorData -EventHubNamespaceName myAzMonEventHub -EventHubAuthorizationRuleName RootListenSharedAccessKey -KeyVaultName AzureMonitorSplunkAddOn
+    This example uses an Event Hub in a different Resource Group with a specific Authorization Rule.
+#>
+param(
+    # Azure SubscriptionId or Name.
     [Parameter(Mandatory=$true)]
     [string] $Subscription,
-    # TenantId or Name backing Azure Subscription
+    # TenantId or Name backing Azure Subscription.
     [Parameter(Mandatory=$true)]
     [string] $TenantId,
-	# Specifies the display name of the application
+	# Specifies the display name of the application.
     [Parameter(Mandatory=$false)]
     [string] $AzureADApplicationName = 'AzureMonitorSplunkAddOn',
-    # Name of Default Resource Group to contain Azure resources if not specified by EventHubResourceGroupName or KeyVaultResourceGroupName
+    # Name of Default Resource Group to contain Azure resources if not specified by EventHubResourceGroupName or KeyVaultResourceGroupName. If it does not exist, it will be created.
     [Parameter(Mandatory=$false)]
     [string] $DefaultResourceGroupName = $AzureADApplicationName,
-    # Location to create resources when not already present
+    # Location to create resources when not already present.
     [Parameter(Mandatory=$true)]
     [string] $DefaultResourceLocation,
-    # Name of Resource Group to contain Event Hub Namespace
+    # Name of Resource Group to contain Event Hub Namespace. If it does not exist, it will be created.
     [Parameter(Mandatory=$false)]
     [string] $EventHubResourceGroupName = $DefaultResourceGroupName,
-    # Name of EventHub Namespace
+    # Name of EventHub Namespace.
     [Parameter(Mandatory=$true)]
     [ValidatePattern("^[a-zA-Z][a-zA-Z0-9-]{4,48}[a-zA-Z0-9]$")]
     [string] $EventHubNamespaceName,
-    # Name of Resource Group to contain Key Vault
+    # Authorization Rule use by Azure Monitor to pull data from event hub. Must contain Listen permission.
+    [Parameter(Mandatory=$false)]
+    [string] $EventHubAuthorizationRuleName = "RootManageSharedAccessKey",
+    # Name of Resource Group to contain Key Vault. If it does not exist, it will be created.
     [Parameter(Mandatory=$false)]
     [string] $KeyVaultResourceGroupName = $DefaultResourceGroupName,
-    # Name of Key Vault
+    # Name of Key Vault.
     [Parameter(Mandatory=$true)]
     [ValidatePattern("^[a-zA-Z][a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$")]
     [string] $KeyVaultName
@@ -38,13 +48,24 @@
 $ErrorActionPreference = "Stop"
 $WarningPreference = "SilentlyContinue"
 
+Import-Module AzureRM.Profile,AzureRM.EventHub,AzureRM.KeyVault,AzureRM.Resources -ErrorAction Stop
+
 ## Authenticate and Set Azure Context
-$AzureRmContext = Get-AzureRmContext
-if (!$AzureRmContext.Subscription -or $AzureRmContext.Subscription.Id -ne $Subscription) {
-	Write-Host 'Please complete authentication in popup window.'
-    Add-AzureRmAccount -Subscription $Subscription -TenantId $TenantId
-    $AzureRmContext = Get-AzureRmContext
+try {
+    $AzureRmContext = Get-AzureRmContext  # Check for existing context
+    if ($AzureRmContext) {
+        if ($AzureRmContext.Subscription.Id -ne $Subscription) {
+            [void](Select-AzureRmSubscription -Subscription $Subscription -Tenant $TenantId)
+        }
+        [void](Get-AzureRmDefault -ErrorAction Stop)
+    }
+    else { throw "No default context" }
 }
+catch {
+    Write-Host 'Please complete authentication in popup window.'
+    Connect-AzureRmAccount -Subscription $Subscription -TenantId $TenantId -ErrorAction Stop
+}
+$AzureRmContext = Get-AzureRmContext
 
 ## Ensure Event Hub Namespace Exists
 # Lookup Event Hub Namespace
@@ -63,7 +84,7 @@ if (!$eventHubNamespace) {
 
 # Event Hub Key
 $eventHubRootKey = Get-AzureRmEventHubKey -ResourceGroupName $eventHubNamespace.ResourceGroup `
-                        -Namespace $eventHubNamespace.Name -Name "RootManageSharedAccessKey"
+                        -Namespace $eventHubNamespace.Name -Name $EventHubAuthorizationRuleName
 
 ## Ensure Key Vault Exists
 # Lookup Key Vault

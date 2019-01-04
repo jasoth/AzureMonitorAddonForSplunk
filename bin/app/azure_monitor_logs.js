@@ -451,7 +451,7 @@ exports.getScheme = function (schemeName, schemeDesc) {
             name: "SPNApplicationId",
             dataType: Argument.dataTypeString,
             description: "Service principal application id (aka client id).",
-            validation: "validate(match('SPNApplicationId', '(?i)^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'), 'SPNApplicationId is not in the guid format 00000000-0000-0000-0000-000000000000')",
+            validation: "validate(match('SPNApplicationId', '(?i)^(?:[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|[*]+)$'), 'SPNApplicationId is not in the guid format 00000000-0000-0000-0000-000000000000')",
             requiredOnCreate: false,
             requiredOnEdit: false
         }),
