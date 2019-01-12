@@ -6,19 +6,19 @@
     Configures Azure Monitor to send monitor data to storage account, event hub, and log analytics.
 #>
 param(
-    # Azure SubscriptionId or Name
+    # Azure SubscriptionId or Name.
     [Parameter(Mandatory=$true)]
     [string] $Subscription,
-    # TenantId or Name backing Azure Subscription
+    # TenantId or Name backing Azure Subscription.
     [Parameter(Mandatory=$true)]
     [string] $TenantId,
-    # Specifies the name of the Azure Monitor profiles
+    # Specifies the name of the Azure Monitor profiles.
     [Parameter(Mandatory=$false)]
     [string] $MonitorProfileName = 'default',
-    # Azure Providers to Monitor
+    # Azure Providers to Monitor.
     [Parameter(Mandatory=$false)]
     [string[]] $MonitorProviders = @('microsoft.insights','microsoft.aadiam','Microsoft.SecurityGraph'),
-    # Resource Group to contain Azure storage, event hub, and/or log analytics. This is overridden by StorageAcctResourceId, EventHubAuthorizationRuleResourceId, and LogAnalyticsWorkspaceResourceId parameters.
+    # Resource Group to contain Azure storage, event hub, and/or log analytics. This is overridden by StorageAcctResourceId, EventHubAuthorizationRuleResourceId, and LogAnalyticsWorkspaceResourceId parameters. If it does not exist, it will be created.
     [Parameter(Mandatory=$false)]
     [string] $ResourceGroupName,
     # Azure storage account name to archive data. This is overridden by StorageAcctResourceId parameters.
@@ -52,12 +52,21 @@ if (!$EventHubAuthorizationRuleResourceId -and $ResourceGroupName -and $EventHub
 if (!$LogAnalyticsWorkspaceResourceId -and $ResourceGroupName -and $LogAnalyticsWorkspaceName) { $LogAnalyticsWorkspaceResourceId = "/subscriptions/$Subscription/resourceGroups/$ResourceGroupName/providers/Microsoft.OperationalInsights/workspaces/$LogAnalyticsWorkspaceName" }
 
 ## Authenticate and Set Azure Context
-$AzureRmContext = Get-AzureRmContext
-if (!$AzureRmContext.Subscription -or $AzureRmContext.Subscription.Id -ne $Subscription) {
-	Write-Host 'Please complete authentication in popup window.'
-    Add-AzureRmAccount -Subscription $Subscription -TenantId $TenantId
-    $AzureRmContext = Get-AzureRmContext
+try {
+    $AzureRmContext = Get-AzureRmContext  # Check for existing context
+    if ($AzureRmContext) {
+        if ($AzureRmContext.Subscription.Id -ne $Subscription) {
+            [void](Select-AzureRmSubscription -Subscription $Subscription -Tenant $TenantId)
+        }
+        [void](Get-AzureRmDefault -ErrorAction Stop)
+    }
+    else { throw "No default context" }
 }
+catch {
+    Write-Host 'Please complete authentication in popup window.'
+    Connect-AzureRmAccount -Subscription $Subscription -TenantId $TenantId -ErrorAction Stop
+}
+$AzureRmContext = Get-AzureRmContext
 
 function New-DiagnosticSettingsConfig {
     param (
