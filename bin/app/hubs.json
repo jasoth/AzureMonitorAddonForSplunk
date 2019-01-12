@@ -19,5 +19,5 @@
     "insights-logs-operationallogs": "resourceId",
     "insights-logs-execution": "resourceId",
     "insights-logs-authoring": "resourceId",
-    "insights-logs-alerts": "resourceId"
+    "insights-logs-alert": "resourceId"
 }
